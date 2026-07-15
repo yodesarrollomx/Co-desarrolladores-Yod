@@ -615,17 +615,13 @@ function doPost(e) {
 //  Compara la contrasena que tecleo el usuario contra la guardada en las
 //  Propiedades del Script. Mensaje generico si falla (no decimos por que).
 function adminLogin(body) {
-  if (!esAdmin(body.pass)) {
-    return jsonResponse({ ok: false, error: 'Credenciales invalidas' });
-  }
+  { const rech = rechazoAdmin_(body); if (rech) return rech; }
   return jsonResponse({ ok: true, role: 'admin' });
 }
 
 // --- getAll: devuelve TODAS las filas de TODAS las hojas (solo admin) -------
 function getAll(body) {
-  if (!esAdmin(body.pass)) {
-    return jsonResponse({ ok: false, error: 'Credenciales invalidas' });
-  }
+  { const rech = rechazoAdmin_(body); if (rech) return rech; }
   const data = {};
   Object.keys(TABS).forEach(function (nombreHoja) {
     data[nombreHoja] = leerHoja(nombreHoja);
@@ -639,9 +635,7 @@ function getAll(body) {
 //  Si no trae llave, la genera (o exige folio en Inversiones) e inserta
 //  (updated=false). Tambien rellena 'creado' si falta.
 function save(body) {
-  if (!esAdmin(body.pass)) {
-    return jsonResponse({ ok: false, error: 'Credenciales invalidas' });
-  }
+  { const rech = rechazoAdmin_(body); if (rech) return rech; }
   return jsonResponse(guardarFilaInterna(body.tab, body.row));
 }
 
@@ -722,9 +716,7 @@ function guardarFilaInterna(tab, rowIn) {
 // --- delete: borra la fila por su llave (solo admin, idempotente) ----------
 //  Se llama remove() internamente porque "delete" es palabra reservada.
 function remove(body) {
-  if (!esAdmin(body.pass)) {
-    return jsonResponse({ ok: false, error: 'Credenciales invalidas' });
-  }
+  { const rech = rechazoAdmin_(body); if (rech) return rech; }
 
   const tab = body.tab;
   const conf = TABS[tab];
@@ -995,9 +987,7 @@ function recuperarClave(body) {
 //  cuando el admin aprieta el boton, no automatico (para no spamear).
 //  Devuelve { ok, enviados:n }.
 function notificarAvance(body) {
-  if (!esAdmin(body.pass)) {
-    return jsonResponse({ ok: false, error: 'Credenciales invalidas' });
-  }
+  { const rech = rechazoAdmin_(body); if (rech) return rech; }
 
   const proyectoId = (body.proyectoId !== undefined && body.proyectoId !== null) ? String(body.proyectoId).trim() : '';
   if (proyectoId === '') return jsonResponse({ ok: false, error: 'Falta el proyecto.' });
@@ -1061,9 +1051,7 @@ function notificarAvance(body) {
 //  Devuelve la URL del portal con el token en el query (?t=...). El admin se la
 //  envia al cliente; al abrirla, el front canjea el token y entra solo.
 function generarLinkAcceso(body) {
-  if (!esAdmin(body.pass)) {
-    return jsonResponse({ ok: false, error: 'Credenciales invalidas' });
-  }
+  { const rech = rechazoAdmin_(body); if (rech) return rech; }
 
   const inversionistaId = (body.inversionistaId !== undefined && body.inversionistaId !== null)
     ? String(body.inversionistaId).trim()
@@ -1598,6 +1586,25 @@ function esAdmin(pass) {
   const guardada = PropertiesService.getScriptProperties().getProperty('ADMIN_PASS');
   if (!guardada) return false; // si no esta configurada, nadie entra como admin
   return comparacionConstante(String(pass), String(guardada));
+}
+
+// --- rechazoAdmin_: guard de admin CON anti fuerza bruta -------------------
+//  Antes las rutas admin (adminLogin, getAll, save, delete, notificarAvance,
+//  generarLinkAcceso) solo hacian esAdmin(pass) SIN throttle: una sola clave
+//  protegia TODO (getAll vuelca CLABEs, montos, correos) y era adivinable sin
+//  limite. Este guard aplica el mismo candado que ya tenian inversionista/asesor,
+//  en su propio espacio 'admin', y registra cada fallo. Devuelve un jsonResponse
+//  de rechazo si esta bloqueado o la clave es invalida; o null si el admin es
+//  valido (la funcion sigue su curso). Reemplaza el viejo bloque esAdmin.
+function rechazoAdmin_(body) {
+  if (demasiadosIntentos('admin')) {
+    return jsonResponse({ ok: false, error: 'Demasiados intentos. Espera unos minutos e intenta de nuevo.' });
+  }
+  if (!esAdmin(body && body.pass)) {
+    registrarIntentoFallido('admin');
+    return jsonResponse({ ok: false, error: 'Credenciales invalidas' });
+  }
+  return null;
 }
 
 // --- comparacionConstante: compara dos textos en tiempo constante ----------
