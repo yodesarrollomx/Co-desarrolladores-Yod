@@ -1076,14 +1076,14 @@ function LoginGate({ onAdmin, onInvestor, onAsesor }) {
               <div className="mt-5 pt-4 border-t border-slate-100 text-center space-y-2">
                 <button
                   onClick={() => { setModo("admin"); setError(""); }}
-                  className="text-xs text-slate-400 hover:text-slate-700 transition inline-flex items-center gap-1.5 px-3 py-2.5"
+                  className="text-xs text-slate-600 hover:text-slate-800 transition inline-flex items-center gap-1.5 px-3 py-2.5"
                 >
                   <ShieldCheck size={13} /> ¿Eres del equipo? Acceso administrador
                 </button>
                 <div>
                   <button
                     onClick={() => { setModo("asesor"); setError(""); setClave(""); }}
-                    className="text-xs text-slate-400 hover:text-slate-700 transition inline-flex items-center gap-1.5 px-3 py-2.5"
+                    className="text-xs text-slate-600 hover:text-slate-800 transition inline-flex items-center gap-1.5 px-3 py-2.5"
                   >
                     <HardHat size={13} /> ¿Eres asesor? Acceso asesor
                   </button>
@@ -1203,7 +1203,7 @@ function LoginGate({ onAdmin, onInvestor, onAsesor }) {
             </form>
           )}
         </div>
-        <p className="text-center text-[11px] text-slate-500 mt-4">
+        <p className="text-center text-[11px] text-slate-400 mt-4">
           Portal interno de control financiero. Tus datos viven solo en una hoja privada de Google.
         </p>
       </div>
