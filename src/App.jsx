@@ -767,7 +767,7 @@ function Field({ label, children, hint }) {
     <label className="block">
       <span className="text-xs font-medium text-slate-600">{label}</span>
       <div className="mt-1">{children}</div>
-      {hint ? <span className="text-[11px] text-slate-400 mt-1 block">{hint}</span> : null}
+      {hint ? <span className="text-[11px] text-slate-500 mt-1 block">{hint}</span> : null}
     </label>
   );
 }
@@ -896,7 +896,7 @@ function BotonRecordarWA({ ap, inversionista, proyecto, soloIcono = false }) {
 }
 
 function Btn({ children, variant = "primary", className = "", ...rest }) {
-  const base = "inline-flex items-center justify-center gap-2 rounded-lg text-sm font-medium px-3.5 py-2.5 sm:py-2 min-h-[44px] sm:min-h-0 transition disabled:opacity-50 disabled:cursor-not-allowed";
+  const base = "inline-flex items-center justify-center gap-2 rounded-lg text-sm font-medium px-3.5 py-2.5 sm:py-2 min-h-[44px] sm:min-h-0 transition disabled:opacity-65 disabled:cursor-not-allowed";
   const variants = {
     primary: "bg-slate-900 text-white hover:bg-slate-800",
     ghost: "bg-transparent text-slate-600 hover:bg-slate-100",
@@ -1067,7 +1067,7 @@ function LoginGate({ onAdmin, onInvestor, onAsesor }) {
                     <div className="text-xs mt-1" style={{ color: "#5c4a24" }}>Consulta tu inversion, aportaciones y documentos</div>
                   </div>
                 </div>
-                <div className="mt-4 inline-flex items-center gap-2 font-semibold text-sm rounded-lg px-3.5 py-2.5 transition group-hover:gap-3" style={{ background: "rgba(26,20,9,0.12)", color: "#1a1409" }}>
+                <div className="mt-4 inline-flex items-center gap-2 font-semibold text-sm rounded-lg px-3.5 py-2.5 transition group-hover:gap-3" style={{ background: "rgba(26,20,9,0.18)", border: "1px solid rgba(26,20,9,0.28)", color: "#1a1409" }}>
                   Entrar a mi portal <ChevronRight size={16} />
                 </div>
               </button>
@@ -1146,7 +1146,7 @@ function LoginGate({ onAdmin, onInvestor, onAsesor }) {
               <Btn type="submit" variant="gold" disabled={cargando || (BACKEND_LISTO && !clave)} className="w-full">
                 {cargando ? <Spinner /> : <KeyRound size={16} />} Ver mi cartera
               </Btn>
-              <button type="button" onClick={() => { setModo("recuperar"); setError(""); setRecOk(false); setEmail(""); }} className="w-full text-center text-xs text-slate-400 hover:text-[#b8965a] transition">¿Olvidaste tu contraseña?</button>
+              <button type="button" onClick={() => { setModo("recuperar"); setError(""); setRecOk(false); setEmail(""); }} className="w-full text-center text-xs text-slate-500 hover:text-[#b8965a] transition">¿Olvidaste tu contraseña?</button>
             </form>
           )}
 
@@ -1921,7 +1921,7 @@ function WizardAlta({ proyectos, onCrear, onClose }) {
           <div className="rounded-xl border border-slate-200 p-4">
             <div className="text-xs text-slate-500 mb-1">Clave de acceso del Codesarrollador (compartesela):</div>
             <div className="text-xl font-mono font-bold tracking-wide text-slate-800 select-all">{resultado.clave}</div>
-            <div className="text-xs text-slate-400 mt-2">{d.email.trim() ? 'Tambien podra recuperarla solo, por correo, con "¿Olvidaste tu contraseña?".' : "Sin correo registrado: no podra recuperarla solo. Compartesela tu, o agrega su correo despues para que pueda recuperarla."}</div>
+            <div className="text-xs text-slate-500 mt-2">{d.email.trim() ? 'Tambien podra recuperarla solo, por correo, con "¿Olvidaste tu contraseña?".' : "Sin correo registrado: no podra recuperarla solo. Compartesela tu, o agrega su correo despues para que pueda recuperarla."}</div>
           </div>
           <div className="flex justify-end"><Btn onClick={onClose}>Cerrar</Btn></div>
         </div>
