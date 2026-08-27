@@ -203,8 +203,11 @@ async function descargarEstadoCuentaPDF({ inv, inversionista, proyecto, aportaci
     y += 62;
 
     // Tabla de aportaciones
-    const filas = aps.length ? aps.map((a) => [
-      String(a.numeroPago || "") + (a.totalPagos ? "/" + a.totalPagos : ""),
+    const filas = aps.length ? aps.map((a, idx) => [
+      // Ordinal REAL de la fila. `numeroPago` puede venir fraccionario (2.5) por el
+      // parche de pago parcial, y entonces el PDF imprimia "2.5/4" en un plan que ya
+      // tiene 5 renglones. El documento que se manda no puede decir eso.
+      String(idx + 1) + "/" + aps.length,
       a.concepto || ("Aportacion " + a.numeroPago),
       fmtFecha(a.fechaProgramada),
       a.fechaRecibida ? fmtFecha(a.fechaRecibida) : "-",
@@ -297,13 +300,25 @@ async function descargarEstadoCuentaPDF({ inv, inversionista, proyecto, aportaci
 
     // Pie / disclaimer
     const disc = rend.modo === "plusvalia"
-      ? "Los valores son estimados y corresponden a la plusvalia por etapa de precio del terreno."
+      ? "Los valores son estimados y se calculan con la escalera de precios comercial vigente del proyecto; no representan m2 escriturados."
       : rend.modo === "tramos"
         ? "Los rendimientos son estimados y corresponden al retorno fijo segun el mes de venta de la propiedad."
         : "Los rendimientos son estimados y se prorratean por dia conforme a la tasa preferente vigente.";
-    ensure(40);
+    // La pantalla si trae la advertencia de que el numero grande NO es retirable, pero el
+    // PDF -que es el documento que circula- la perdia. Va en los tres modos.
+    const noRetirable = liquidada
+      ? ""
+      : " Estimacion al dia de hoy: no es dinero disponible para retirar; se realiza al vender o devolver el capital.";
+    const vencidasPDF = aps.filter((a) => estadoAportacion(a) === "Vencida");
+    const avisoVencidas = vencidasPDF.length
+      ? " Las proyecciones suponen que se completan las aportaciones pendientes; a la fecha hay " +
+        vencidasPDF.length + " aportacion" + (vencidasPDF.length > 1 ? "es" : "") + " vencida" +
+        (vencidasPDF.length > 1 ? "s" : "") + " por " +
+        money(vencidasPDF.reduce((s, a) => s + num(a.monto), 0)) + "."
+      : "";
+    ensure(46);
     doc.setFontSize(7.5); doc.setTextColor(150, 150, 150);
-    doc.text(doc.splitTextToSize("Documento informativo. No es un comprobante fiscal. " + disc + "  YODESARROLLO - Emitido el " + fmtFecha(todayISO()), W - M * 2), M, Math.min(y + 6, PH - 30));
+    doc.text(doc.splitTextToSize("Documento informativo. No es un comprobante fiscal. " + disc + noRetirable + avisoVencidas + "  YODESARROLLO - Emitido el " + fmtFecha(todayISO()), W - M * 2), M, Math.min(y + 6, PH - 30));
 
     const safe = String(inversionista?.nombre || inv.folio || "estado")
       .normalize("NFD").replace(/[̀-ͯ]/g, "") // quita acentos -> ASCII puro
@@ -1266,7 +1281,10 @@ function Calculadora({ capitalInicial = 1000000, fechaInicio = todayISO(), tasaI
     }
     // Por meses: convertimos meses a dias con 365/12 = 30.4167
     const dias = Math.round(Number(meses) * (365 / 12));
-    const tasaN = Number(tasa) || TASA_DEFAULT;
+    // Una tasa de 0 es un dato valido, no "vacio": con `Number(tasa) || TASA_DEFAULT`
+    // el 0 se convertia en 25% y la calculadora contradecia a la tabla de referencia,
+    // que si respeta el 0.
+    const tasaN = (tasa === "" || tasa == null) ? TASA_DEFAULT : Math.max(0, Number(tasa) || 0);
     const rendimientoPct = dias * (tasaN / 365);
     const cap = Number(capital) || 0;
     const totalARecibir = cap * (1 + rendimientoPct / 100);
@@ -1564,9 +1582,19 @@ function InversionForm({ value, onChange, inversionistas, proyectos, precios, es
         <Field label="Monto total comprometido">
           <Input type="number" min="0" value={value.montoTotal || ""} onChange={(e) => set("montoTotal", e.target.value)} placeholder="1000000" />
         </Field>
-        <Field label="Tasa anual (%)">
-          <Input type="number" min="0" value={value.tasaAnual ?? TASA_DEFAULT} onChange={(e) => set("tasaAnual", e.target.value)} step="0.1" />
-        </Field>
+        {/* En proyectos de plusvalia la tasa anual NO se usa: calcularRendimientoInversion
+            sale por la rama de plusvalia y nunca lee tasaAnual ni tramos. Dejar el campo
+            visible hacia que se capturaran los dos modelos a la vez (RM-ME-2025-01 tiene
+            tasaAnual 17.6 Y precioEntrada 4050) y el sistema elegia uno en silencio. */}
+        {!esPlusvalia ? (
+          <Field label="Tasa anual (%)">
+            <Input type="number" min="0" value={value.tasaAnual ?? TASA_DEFAULT} onChange={(e) => set("tasaAnual", e.target.value)} step="0.1" />
+          </Field>
+        ) : (
+          <Field label="Tasa anual (%)" hint="No aplica: este proyecto rinde por plusvalia de etapa.">
+            <div className="h-[38px] flex items-center px-3 rounded-lg border border-dashed border-slate-200 bg-slate-50 text-sm text-slate-400">No aplica</div>
+          </Field>
+        )}
         <Field label="Fecha de inicio" hint="Arranca el conteo de dias del rendimiento.">
           <Input type="date" value={toDateInput(value.fechaInicio)} onChange={(e) => set("fechaInicio", e.target.value)} />
         </Field>
@@ -1577,7 +1605,24 @@ function InversionForm({ value, onChange, inversionistas, proyectos, precios, es
       <Field label="Notas">
         <Textarea rows={2} value={value.notas || ""} onChange={(e) => set("notas", e.target.value)} />
       </Field>
-      <TramosEditor value={value.tramos || ""} onChange={(v) => set("tramos", v)} />
+      {!esPlusvalia ? <TramosEditor value={value.tramos || ""} onChange={(v) => set("tramos", v)} /> : null}
+
+      {/* Aviso de DOBLE MODELO: si un proyecto de plusvalia trae ademas tasa o tramos
+          capturados, el portal escoge plusvalia sin decirlo y el numero que ve el
+          codesarrollador deja de ser el de su contrato. */}
+      {esPlusvalia && (num(value.tasaAnual) > 0 || String(value.tramos || "").trim()) ? (
+        <div className="rounded-xl border border-red-200 bg-red-50 p-3 flex items-start gap-2">
+          <AlertCircle size={16} className="text-red-600 shrink-0 mt-0.5" />
+          <div className="text-sm text-red-900">
+            <b>Esta inversion tiene dos modelos capturados a la vez.</b> El proyecto es de plusvalia,
+            pero la fila trae {num(value.tasaAnual) > 0 ? <>tasa anual <b>{value.tasaAnual}%</b></> : null}
+            {num(value.tasaAnual) > 0 && String(value.tramos || "").trim() ? " y " : null}
+            {String(value.tramos || "").trim() ? <b>tramos</b> : null}.
+            El portal muestra el valor por <b>plusvalia</b> e ignora lo demas. Si el contrato dice otra cosa,
+            el codesarrollador esta viendo un numero que no es el suyo.
+          </div>
+        </div>
+      ) : null}
 
       {/* Plusvalia: si el PROYECTO elegido es de plusvalia, solo se captura el
           precio de ENTRADA a mano (la etapa actual vive en el proyecto). */}
@@ -3272,10 +3317,30 @@ function DetalleInversion({
         )}
       </div>
 
-      {/* Calculadora con datos de esta inversion */}
+      {/* Calculadora con datos de esta inversion.
+          SOLO se monta en inversiones de tasa anual simple. Antes se montaba siempre y
+          cotizaba interes anual sobre inversiones de TRAMOS y de PLUSVALIA: en
+          CA-HM-2026-01 a 24 meses daba 50% = $1,500,000 cuando el contrato por tramos
+          topa en 25% = $1,250,000. Un cuarto de millon inventado en la pantalla con la
+          que se cotiza. */}
       <div className="bg-white rounded-2xl border border-slate-200 p-4">
         <h3 className="font-semibold text-slate-800 flex items-center gap-2 mb-3"><Calculator size={18} /> Simular rendimiento de esta inversion</h3>
-        <Calculadora capitalInicial={monto || 1000000} fechaInicio={toDateInput(inv.fechaInicio) || todayISO()} tasaInicial={inv.tasaAnual ?? TASA_DEFAULT} />
+        {rend.modo === "anual" ? (
+          <Calculadora capitalInicial={monto || 1000000} fechaInicio={toDateInput(inv.fechaInicio) || todayISO()} tasaInicial={inv.tasaAnual ?? TASA_DEFAULT} />
+        ) : (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-3.5">
+            <div className="flex items-start gap-2">
+              <AlertCircle size={16} className="text-amber-600 shrink-0 mt-0.5" />
+              <div className="text-sm text-amber-900">
+                {rend.modo === "tramos" ? (
+                  <>Esta inversion rinde por <b>tramos</b> ({(arr(parseTramos(inv.tramos)) || []).map(t => `${t.desde}-${t.hasta}: ${t.pct}%`).join(" · ")}), no por tasa anual simple. Simular con interes anual daria un numero mas alto que el del contrato, por eso la calculadora no aplica aqui. El valor real ya esta arriba, calculado por tramos.</>
+                ) : (
+                  <>Esta inversion rinde por <b>plusvalia por etapa</b> del precio por m², no por tasa. La calculadora de interes anual no aplica: el valor se mueve cuando el proyecto cambia de etapa de precio, no con el tiempo.</>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Documentos */}
@@ -3961,11 +4026,17 @@ function InvestorApp({ clave, onLogout, onClaveCambiada }) {
         )}
         {error && (
           <div className="flex items-start gap-2 rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-red-700 text-sm">
-            <AlertCircle size={18} className="shrink-0 mt-0.5" /> <span>{error}</span>
+            <AlertCircle size={18} className="shrink-0 mt-0.5" />
+            <span className="flex-1">{error}</span>
+            <button onClick={() => cargar()} className="shrink-0 underline font-medium hover:text-red-900">Reintentar</button>
           </div>
         )}
 
-        {!cargando && !error && data && (
+        {/* La cartera se sigue mostrando aunque haya un error, siempre que ya tengamos
+            datos cargados. Antes cualquier fallo (un pago que no se pudo reportar, un
+            comprobante que no abrio) vaciaba la pantalla completa y dejaba al
+            codesarrollador con una barra roja y nada mas, sin forma de reintentar. */}
+        {!cargando && data && (
           <>
             <div className="mb-1">
               <div className="text-2xl font-display text-slate-900">Hola, {(inv?.nombre || "").split(" ")[0] || "Codesarrollador"}</div>
@@ -4016,11 +4087,25 @@ function InvestorApp({ clave, onLogout, onClaveCambiada }) {
               const ganancia = rend.ganancia;
               const pagosRecibidos = aps.filter(a => estadoAportacion(a) === "Recibida").length;
               const proximo = aps.find(a => estadoAportacion(a) !== "Recibida");
+              // Aportaciones YA VENCIDAS: la tarjeta "Tu proximo paso" solo miraba la
+              // primera pendiente y la anunciaba en futuro ("vence 03 jul 2026") aunque
+              // la fecha ya hubiera pasado, y pedia el monto de una sola cuando el adeudo
+              // real eran varias. Aqui se calcula el atraso completo.
+              const vencidas = aps.filter(a => estadoAportacion(a) === "Vencida");
+              const montoVencido = vencidas.reduce((s, a) => s + num(a.monto), 0);
+              const proximoVencido = proximo ? estadoAportacion(proximo) === "Vencida" : false;
               const progresoPct = monto > 0 ? Math.min(100, Math.round((recibido / monto) * 100)) : 0;
               const docs = documentos.filter(d => String(d.folio) === String(iv.folio));
               const liquidada = (iv.estado || "Activa") === "Liquidada";
               const avances = arr(data?.avances).filter(a => String(a.proyectoId) === String(iv.proyectoId)).sort((a, b) => String(b.fecha || "").localeCompare(String(a.fecha || "")));
-              const bitacora = arr(data?.bitacora).filter(b => String(b.proyectoId) === String(iv.proyectoId)).sort((a, b) => String(b.fecha || "").localeCompare(String(a.fecha || "")));
+              // Bitacora: SOLO las notas marcadas como visibles para el cliente.
+              // Es por PROYECTO, asi que sin este filtro toda nota interna del asesor
+              // (negociaciones, "no se vende", exclusivas) le llega a cada codesarrollador.
+              // Sin valor = interna. Se publica marcando visibilidad='cliente' desde el admin.
+              const bitacora = arr(data?.bitacora)
+                .filter(b => String(b.proyectoId) === String(iv.proyectoId))
+                .filter(b => String(b.visibilidad || "").trim().toLowerCase() === "cliente")
+                .sort((a, b) => String(b.fecha || "").localeCompare(String(a.fecha || "")));
               return (
                 <div key={iv.folio} className="space-y-4">
                   {/* HERO: cuanto vale hoy tu inversion */}
@@ -4058,12 +4143,20 @@ function InvestorApp({ clave, onLogout, onClaveCambiada }) {
                       <div className="mt-2"><VerComprobante comprobante={proximo.comprobanteUrl} id={proximo.id} auth={{ clave }} label="Ver mi comprobante" /></div>
                     </div>
                   ) : !liquidada && proximo ? (
-                    <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
-                      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-2">Tu proximo paso</div>
-                      <div className="flex items-baseline justify-between flex-wrap gap-1">
-                        <div className="text-xl font-semibold text-slate-800">Deposita {money(proximo.monto)}</div>
-                        <div className="text-sm text-slate-500">{proximo.concepto || `Aportacion ${proximo.numeroPago}`} · vence {fmtFecha(proximo.fechaProgramada)}</div>
+                    <div className="bg-white rounded-2xl border p-5 shadow-sm" style={{ borderColor: proximoVencido ? "#fca5a5" : "#e2e8f0" }}>
+                      <div className="text-[11px] font-semibold uppercase tracking-wide mb-2" style={{ color: proximoVencido ? "#b91c1c" : "#94a3b8" }}>
+                        {proximoVencido ? (vencidas.length > 1 ? `Tienes ${vencidas.length} aportaciones vencidas` : "Tienes una aportacion vencida") : "Tu proximo paso"}
                       </div>
+                      <div className="flex items-baseline justify-between flex-wrap gap-1">
+                        <div className="text-xl font-semibold text-slate-800">Deposita {money(proximoVencido ? montoVencido : proximo.monto)}</div>
+                        <div className="text-sm text-slate-500">
+                          {proximo.concepto || `Aportacion ${proximo.numeroPago}`}
+                          {proximoVencido ? <> · vencio el {fmtFecha(proximo.fechaProgramada)}</> : <> · vence {fmtFecha(proximo.fechaProgramada)}</>}
+                        </div>
+                      </div>
+                      {proximoVencido && vencidas.length > 1 ? (
+                        <div className="text-xs text-red-700 mt-1">Suma de las {vencidas.length} aportaciones vencidas. La mas antigua vencio el {fmtFecha(vencidas[0].fechaProgramada)}.</div>
+                      ) : null}
                       {proyecto && (proyecto.clabe || proyecto.cuenta) ? (
                         <div className="mt-3 rounded-xl bg-slate-50 border border-slate-100 p-3">
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6">
@@ -4121,13 +4214,22 @@ function InvestorApp({ clave, onLogout, onClaveCambiada }) {
                   )}
 
                   {/* AVANCE DE OBRA (galeria de fotos/videos) */}
-                  {avances.length > 0 && (
-                    <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+                  {/* La seccion se pinta SIEMPRE: esconderla cuando no hay avances deja
+                      al codesarrollador sin saber si el proyecto no avanza o si el portal
+                      no le esta mostrando lo que si hay. */}
+                  <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
                       <div className="flex items-center gap-2 mb-3 flex-wrap">
                         <HardHat size={17} style={{ color: "#c9a96e" }} />
                         <h3 className="font-semibold text-slate-800">Avance de tu proyecto</h3>
                         {proyecto?.etapaActual ? <span className="text-[10px] px-2 py-0.5 rounded-full" style={{ background: "rgba(201,169,110,0.16)", color: "#7a5e1e" }}>Etapa: {proyecto.etapaActual}</span> : null}
                       </div>
+                      {avances.length === 0 ? (
+                        <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/60 p-4 text-center">
+                          <HardHat size={22} className="mx-auto mb-1.5 text-slate-300" />
+                          <div className="text-sm text-slate-600">Todavia no hay avances publicados de este proyecto.</div>
+                          <div className="text-xs text-slate-400 mt-0.5">En cuanto se publique una foto o un reporte de obra, lo veras aqui y te avisamos por correo.</div>
+                        </div>
+                      ) : (
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
                         {avances.map((av) => {
                           const esFoto = av.tipo !== "video" && av.tipo !== "documento";
@@ -4155,8 +4257,8 @@ function InvestorApp({ clave, onLogout, onClaveCambiada }) {
                           );
                         })}
                       </div>
+                      )}
                     </div>
-                  )}
 
                   {/* BITACORA / SEGUIMIENTO DEL ASESOR (linea de tiempo) */}
                   {bitacora.length > 0 && (
@@ -4182,10 +4284,44 @@ function InvestorApp({ clave, onLogout, onClaveCambiada }) {
                     </div>
                   )}
 
+                  {/* MI EXPEDIENTE — tarjeta propia y SIEMPRE visible.
+                      Antes los documentos vivian escondidos dentro del acordeon y ademas
+                      se ocultaban por completo si no habia ninguno: quien puso millones no
+                      veia ni una palabra de su contrato, y no habia forma de distinguir
+                      "no hay documentos" de "el portal no me los muestra". */}
+                  <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+                    <div className="flex items-center gap-2 mb-3">
+                      <FileText size={17} style={{ color: "#c9a96e" }} />
+                      <h3 className="font-semibold text-slate-800">Mi expediente</h3>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full ml-auto" style={{ background: "rgba(201,169,110,0.16)", color: "#7a5e1e" }}>{docs.length} {docs.length === 1 ? "documento" : "documentos"}</span>
+                    </div>
+                    {docs.length === 0 ? (
+                      <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/60 p-4 text-center">
+                        <FileText size={22} className="mx-auto mb-1.5 text-slate-300" />
+                        <div className="text-sm text-slate-600">Todavia no tienes documentos publicados en el portal.</div>
+                        <div className="text-xs text-slate-400 mt-0.5">Aqui apareceran tu contrato de co-desarrollo, tu promesa de pago y el material del proyecto.</div>
+                        <button onClick={() => setPanel("duda")} className="mt-2.5 text-xs underline" style={{ color: "#b8965a" }}>Solicitar mis documentos</button>
+                      </div>
+                    ) : (
+                      <ul className="space-y-1.5">
+                        {docs.map((d) => (
+                          <li key={d.id} className="flex items-center gap-2.5 text-sm rounded-lg px-2.5 py-2 border border-slate-100 bg-slate-50/50">
+                            <FileText size={15} className="shrink-0" style={{ color: "#c9a96e" }} />
+                            <span className="text-slate-700 truncate flex-1">{d.nombre || d.tipo}</span>
+                            {d.tipo ? <span className="text-[10px] text-slate-400 hidden sm:inline">{d.tipo}</span> : null}
+                            {d.url
+                              ? <a href={d.url} target="_blank" rel="noreferrer" className="text-slate-400 hover:text-[#b8965a] shrink-0" title="Abrir"><Link2 size={15} /></a>
+                              : <span className="text-[10px] text-amber-600 shrink-0">sin archivo</span>}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+
                   {/* DETALLE (secundario, colapsado) */}
                   <details className="bg-white rounded-2xl border border-slate-200 p-5 group shadow-sm">
                     <summary className="cursor-pointer list-none flex items-center justify-between text-sm font-medium text-slate-700">
-                      <span className="flex items-center gap-2"><Calendar size={15} className="text-slate-400" /> Detalle de mis aportaciones y documentos</span>
+                      <span className="flex items-center gap-2"><Calendar size={15} className="text-slate-400" /> Detalle de mis aportaciones</span>
                       <ChevronDown size={16} className="text-slate-400 group-open:rotate-180 transition" />
                     </summary>
                     <div className="mt-4 overflow-x-auto">
@@ -4203,20 +4339,6 @@ function InvestorApp({ clave, onLogout, onClaveCambiada }) {
                         </tbody>
                       </table>
                     </div>
-                    {docs.length > 0 && (
-                      <div className="mt-4 pt-4 border-t border-slate-100">
-                        <div className="text-xs font-medium text-slate-500 mb-1.5 flex items-center gap-1.5"><FileText size={14} /> Mis documentos</div>
-                        <ul className="space-y-1">
-                          {docs.map((d) => (
-                            <li key={d.id} className="flex items-center gap-2 text-sm">
-                              <FileText size={14} className="text-slate-400 shrink-0" />
-                              <span className="text-slate-600 truncate flex-1">{d.nombre || d.tipo}</span>
-                              {d.url ? <a href={d.url} target="_blank" rel="noreferrer" className="text-slate-400 hover:text-[#b8965a]"><Link2 size={15} /></a> : null}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
                     <div className="mt-4 pt-4 border-t border-slate-100">
                       <Btn variant="outline" onClick={() => descargarEstadoCuentaPDF({ inv: iv, inversionista: inv, proyecto, aportaciones: aps, precios: data?.preciosPlusvalia })} className="w-full sm:w-auto">
                         <Printer size={15} /> Descargar estado de cuenta (PDF)
