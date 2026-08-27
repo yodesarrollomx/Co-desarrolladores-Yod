@@ -1798,9 +1798,36 @@ function BitacoraForm({ value, onChange }) {
       <Field label="Titulo (opcional)">
         <Input value={value.titulo || ""} onChange={(e) => set("titulo", e.target.value)} placeholder="Resumen corto" />
       </Field>
-      <Field label="Nota" hint="Lo que el asesor le quiere comunicar al Codesarrollador.">
+      <Field label="Nota">
         <Textarea rows={3} value={value.nota || ""} onChange={(e) => set("nota", e.target.value)} />
       </Field>
+      {/* Antes no existia esta separacion: una sola columna, publicacion automatica
+          y sin aprobacion. Lo que el asesor escribiera se le pintaba tal cual al
+          codesarrollador. Ahora toda nota nace INTERNA y publicarla es un acto
+          deliberado del admin. */}
+      <Field label="¿Quien puede ver esta nota?">
+        <Select value={String(value.visibilidad || "interna").toLowerCase() === "cliente" ? "cliente" : "interna"} onChange={(e) => set("visibilidad", e.target.value)}>
+          <option value="interna">Solo el equipo (interna)</option>
+          <option value="cliente">Tambien el codesarrollador (se publica en su portal)</option>
+        </Select>
+      </Field>
+      {String(value.visibilidad || "").toLowerCase() === "cliente" ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
+          <div className="flex items-start gap-2">
+            <AlertCircle size={16} className="text-amber-600 shrink-0 mt-0.5" />
+            <div className="text-sm text-amber-900">
+              <b>Esto lo va a leer el codesarrollador.</b> La bitacora es por proyecto: la veran
+              <b> todos</b> los codesarrolladores de este proyecto, no solo uno. Asi se vera:
+              <div className="mt-2 rounded-lg bg-white border border-amber-200 p-2.5">
+                <div className="text-xs text-slate-400">{fmtFecha(value.fecha) || "hoy"}{value.etiqueta ? ` · ${value.etiqueta}` : ""}</div>
+                {value.titulo ? <div className="text-sm font-semibold text-slate-800 mt-0.5">{value.titulo}</div> : null}
+                <div className="text-sm text-slate-600 mt-0.5">{value.nota || <span className="text-slate-300">(sin texto)</span>}</div>
+                {value.autor ? <div className="text-xs text-slate-400 mt-1">— {value.autor}</div> : null}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -2273,7 +2300,7 @@ function AdminApp({ pass, onLogout }) {
       Aportaciones: { folio: "", numeroPago: "", totalPagos: "", concepto: "", fechaProgramada: "", monto: "", fechaRecibida: "", comprobanteUrl: "", referencia: "", fechaReporte: "", montoReportado: "" },
       Documentos: { folio: "", tipo: "Contrato", nombre: "", url: "", fecha: todayISO() },
       Avances: { proyectoId: "", tipo: "foto", etapa: "", url: "", titulo: "", descripcion: "", fecha: todayISO() },
-      Bitacora: { proyectoId: "", fecha: todayISO(), autor: "", etiqueta: "Avance", titulo: "", nota: "" },
+      Bitacora: { proyectoId: "", fecha: todayISO(), autor: "", etiqueta: "Avance", titulo: "", nota: "", visibilidad: "interna" },
       Asesores: { nombre: "", email: "", claveAcceso: generarClaveAcceso(), proyectoIds: "" },
       Referidos: { referidorNombre: "", nombreProspecto: "", contacto: "", nota: "", estado: "Pendiente" },
     };
