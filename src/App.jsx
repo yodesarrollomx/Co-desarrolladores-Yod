@@ -4309,13 +4309,13 @@ function InvestorApp({ clave, onLogout, onClaveCambiada }) {
               const docs = documentos.filter(d => String(d.folio) === String(iv.folio));
               const liquidada = (iv.estado || "Activa") === "Liquidada";
               const avances = arr(data?.avances).filter(a => String(a.proyectoId) === String(iv.proyectoId)).sort((a, b) => String(b.fecha || "").localeCompare(String(a.fecha || "")));
-              // Bitacora: SOLO las notas marcadas como visibles para el cliente.
-              // Es por PROYECTO, asi que sin este filtro toda nota interna del asesor
-              // (negociaciones, "no se vende", exclusivas) le llega a cada codesarrollador.
-              // Sin valor = interna. Se publica marcando visibilidad='cliente' desde el admin.
+              // Bitacora: se esconde la que diga 'oculto' en la columna 'visibilidad'
+              // del Sheet — la MISMA regla que Documentos y Avances. Es por PROYECTO,
+              // asi que una nota publicada la leen todos los codesarrolladores de ese
+              // proyecto. Lo que escribe la asesora nace 'oculto' a la fuerza.
               const bitacora = arr(data?.bitacora)
                 .filter(b => String(b.proyectoId) === String(iv.proyectoId))
-                .filter(b => String(b.visibilidad || "").trim().toLowerCase() === "cliente")
+                .filter(b => !esOculto(b))   // misma regla que Documentos y Avances
                 .sort((a, b) => String(b.fecha || "").localeCompare(String(a.fecha || "")));
               return (
                 <div key={iv.folio} className="space-y-4">
