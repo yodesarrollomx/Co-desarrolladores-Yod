@@ -668,6 +668,9 @@ function edadTexto(fechaISO, umbral = 30) {
 function esOculto(row) {
   return String(row?.visibilidad || "").trim().toLowerCase() === "oculto";
 }
+// UNA SOLA REGLA en Documentos, Avances y Bitacora: la columna 'visibilidad' del
+// Sheet vacia = se ve; con la palabra "oculto" = no se ve. Igual en las tres,
+// para no tener que recordar dos comportamientos distintos.
 
 function arr(x) { return Array.isArray(x) ? x : []; }
 function num(x) { const v = Number(x); return isFinite(v) ? v : 0; }
@@ -1885,13 +1888,13 @@ function BitacoraForm({ value, onChange }) {
           y sin aprobacion. Lo que el asesor escribiera se le pintaba tal cual al
           codesarrollador. Ahora toda nota nace INTERNA y publicarla es un acto
           deliberado del admin. */}
-      <Field label="¿Quien puede ver esta nota?">
-        <Select value={String(value.visibilidad || "interna").toLowerCase() === "cliente" ? "cliente" : "interna"} onChange={(e) => set("visibilidad", e.target.value)}>
-          <option value="interna">Solo el equipo (interna)</option>
-          <option value="cliente">Tambien el codesarrollador (se publica en su portal)</option>
+      <Field label="¿Quien puede ver esta nota?" hint="Es la columna 'visibilidad' del Sheet: vacia se ve, 'oculto' no.">
+        <Select value={esOculto(value) ? "oculto" : ""} onChange={(e) => set("visibilidad", e.target.value)}>
+          <option value="">La ve el codesarrollador en su portal</option>
+          <option value="oculto">Oculta — solo el equipo</option>
         </Select>
       </Field>
-      {String(value.visibilidad || "").toLowerCase() === "cliente" ? (
+      {!esOculto(value) ? (
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
           <div className="flex items-start gap-2">
             <AlertCircle size={16} className="text-amber-600 shrink-0 mt-0.5" />
@@ -2402,7 +2405,7 @@ function AdminApp({ pass, onLogout }) {
       Aportaciones: { folio: "", numeroPago: "", totalPagos: "", concepto: "", fechaProgramada: "", monto: "", fechaRecibida: "", comprobanteUrl: "", referencia: "", fechaReporte: "", montoReportado: "" },
       Documentos: { folio: "", tipo: "Contrato", nombre: "", url: "", fecha: todayISO() },
       Avances: { proyectoId: "", tipo: "foto", etapa: "", url: "", titulo: "", descripcion: "", fecha: todayISO() },
-      Bitacora: { proyectoId: "", fecha: todayISO(), autor: "", etiqueta: "Avance", titulo: "", nota: "", visibilidad: "interna" },
+      Bitacora: { proyectoId: "", fecha: todayISO(), autor: "", etiqueta: "Avance", titulo: "", nota: "", visibilidad: "" },
       Asesores: { nombre: "", email: "", claveAcceso: generarClaveAcceso(), proyectoIds: "" },
       Referidos: { referidorNombre: "", nombreProspecto: "", contacto: "", nota: "", estado: "Pendiente" },
     };
