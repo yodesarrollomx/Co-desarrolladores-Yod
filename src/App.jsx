@@ -625,6 +625,14 @@ function estadoAportacion(ap) {
   return "Pendiente";
 }
 
+// ¿Esta fila esta escondida del portal del codesarrollador?
+// Avances y Documentos nacen VISIBLES (existen para publicarse), asi que una fila
+// sin la columna 'visibilidad' se ve; solo se esconde la que diga 'oculto'.
+// La bitacora es al reves: nace interna y publicar es un acto deliberado.
+function esOculto(row) {
+  return String(row?.visibilidad || "").trim().toLowerCase() === "oculto";
+}
+
 function arr(x) { return Array.isArray(x) ? x : []; }
 function num(x) { const v = Number(x); return isFinite(v) ? v : 0; }
 
@@ -2163,6 +2171,17 @@ function AdminApp({ pass, onLogout }) {
     [aportacionesDeFolio]);
 
   // ----- guardar (save) con UI optimista -----
+  // Ocultar / mostrar del portal del codesarrollador SIN borrar nada. La fila se
+  // queda en el Sheet y el archivo en Drive; solo deja de viajar en getMine.
+  // Es reversible con el mismo boton, por eso no pide confirmacion.
+  const alternarVisibilidad = useCallback(async (tab, row, etiqueta) => {
+    const ocultarAhora = !esOculto(row);
+    await guardarFila(tab, { ...row, visibilidad: ocultarAhora ? "oculto" : "" });
+    notificar(ocultarAhora
+      ? `Listo: "${etiqueta}" ya no lo ve el codesarrollador. No se borro nada.`
+      : `Listo: "${etiqueta}" vuelve a verse en su portal.`);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const guardarFila = useCallback(async (tab, row) => {
     setGuardando(true);
     setError("");
@@ -2542,6 +2561,7 @@ function AdminApp({ pass, onLogout }) {
             onNuevoAvance={(proyectoId) => nuevoRegistro("Avances", { proyectoId })}
             onEditarAvance={(row) => setModal({ tab: "Avances", row: { ...row }, esNuevo: false })}
             onEliminarAvance={(row) => setConfirm({ tab: "Avances", key: row.id, msg: `Se eliminara el avance "${row.titulo || row.tipo}".` })}
+            onAlternarAvance={(row) => alternarVisibilidad("Avances", row, row.titulo || "el avance")}
             onNuevaNota={(proyectoId) => nuevoRegistro("Bitacora", { proyectoId })}
             onEditarNota={(row) => setModal({ tab: "Bitacora", row: { ...row }, esNuevo: false })}
             onEliminarNota={(row) => setConfirm({ tab: "Bitacora", key: row.id, msg: `Se eliminara la nota de bitacora.` })}
@@ -2605,6 +2625,8 @@ function AdminApp({ pass, onLogout }) {
             onGenerarPlan={(folio) => generarPlanPagos(folio)}
             onNuevoDocumento={(folio) => nuevoRegistro("Documentos", { folio })}
             onEliminarDocumento={(row) => setConfirm({ tab: "Documentos", key: row.id, msg: `Se eliminara el documento "${row.nombre || row.tipo}".` })}
+            onEditarDocumento={(row) => setModal({ tab: "Documentos", row: { ...row }, esNuevo: false })}
+            onAlternarDocumento={(row) => alternarVisibilidad("Documentos", row, row.nombre || "el documento")}
             onAbrirProyecto={(proyectoId) => { setInversionAbierta(null); setVista("proyectos"); setProyectoAbierto(proyectoId); }}
           />
         )}
@@ -2983,7 +3005,7 @@ function ListaInversiones({ data, inversionistaPorId, proyectoPorId, capitalReci
 // TABLERO DE PROYECTO — gestiona avances y bitacora a NIVEL PROYECTO
 // (los comparten todos los codesarrolladores de ese proyecto)
 // ===================================================================
-function ProyectoDetalle({ proyectoId, data, inversionistaPorId, onVolver, onEditarProyecto, onAbrirInversion, onNuevoAvance, onEditarAvance, onEliminarAvance, onNuevaNota, onEditarNota, onEliminarNota, onNotificar, onGenerarLink }) {
+function ProyectoDetalle({ proyectoId, data, inversionistaPorId, onVolver, onEditarProyecto, onAbrirInversion, onNuevoAvance, onEditarAvance, onEliminarAvance, onAlternarAvance, onNuevaNota, onEditarNota, onEliminarNota, onNotificar, onGenerarLink }) {
   const [enviandoAviso, setEnviandoAviso] = useState(false);
   const [generandoLink, setGenerandoLink] = useState("");  // inversionistaId en proceso
   const [linksGenerados, setLinksGenerados] = useState({}); // { inversionistaId: url }
@@ -3180,12 +3202,17 @@ function ProyectoDetalle({ proyectoId, data, inversionistaPorId, onVolver, onEdi
                     <img src={driveImg(av.url)} alt={av.titulo || "Avance"} loading="lazy" className="w-full h-full object-cover" />
                   )}
                   {av.etapa ? <span className="absolute top-1 left-1 text-[9px] px-1.5 py-0.5 rounded-full bg-black/55 text-white">{av.etapa}</span> : null}
+                  {esOculto(av) ? <span className="absolute top-1 right-1 text-[9px] px-1.5 py-0.5 rounded-full bg-slate-800/85 text-white flex items-center gap-1"><EyeOff size={9} /> oculto</span> : null}
                 </div>
-                <div className="p-2">
+                <div className="p-2" style={esOculto(av) ? { opacity: 0.6 } : undefined}>
                   <div className="text-xs font-medium text-slate-700 truncate">{av.titulo || "(sin titulo)"}</div>
                   <div className="text-[10px] text-slate-400">{fmtFecha(av.fecha)}</div>
                   <div className="flex justify-end gap-1 mt-1">
                     {av.url ? <a href={av.url} target="_blank" rel="noreferrer" className="text-slate-400 hover:text-[#b8965a] p-1"><ExternalLink size={13} /></a> : null}
+                    {/* Ocultar en vez de borrar: la foto se queda en Drive y la fila en el
+                        Sheet; solo deja de viajar al portal. Es reversible con el mismo boton. */}
+                    <IconBtn onClick={() => onAlternarAvance(av)} icon={esOculto(av) ? EyeOff : Eye}
+                      title={esOculto(av) ? "Oculto para el codesarrollador — clic para mostrarlo" : "Visible para el codesarrollador — clic para ocultarlo"} />
                     <IconBtn onClick={() => onEditarAvance(av)} icon={Pencil} title="Editar" />
                     <IconBtn onClick={() => onEliminarAvance(av)} icon={Trash2} title="Eliminar" danger />
                   </div>
@@ -3233,7 +3260,7 @@ function ProyectoDetalle({ proyectoId, data, inversionistaPorId, onVolver, onEdi
 function DetalleInversion({
   folio, data, pass, inversionistaPorId, proyectoPorId, aportacionesDeFolio, documentosDeFolio, capitalRecibido,
   onVolver, onEditarInversion, onNuevaAportacion, onEditarAportacion, onEliminarAportacion,
-  onMarcarRecibida, onGuardarComprobante, onGenerarPlan, onNuevoDocumento, onEliminarDocumento,
+  onMarcarRecibida, onGuardarComprobante, onGenerarPlan, onNuevoDocumento, onEliminarDocumento, onEditarDocumento, onAlternarDocumento,
   onAbrirProyecto,
 }) {
   const inv = arr(data.Inversiones).find(i => String(i.folio) === String(folio));
@@ -3417,13 +3444,19 @@ function DetalleInversion({
         ) : (
           <ul className="divide-y divide-slate-100">
             {documentos.map((d) => (
-              <li key={d.id} className="py-2.5 flex items-center gap-3">
+              <li key={d.id} className="py-2.5 flex items-center gap-3" style={esOculto(d) ? { opacity: 0.6 } : undefined}>
                 <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center shrink-0"><FileText size={15} className="text-slate-500" /></div>
                 <div className="min-w-0 flex-1">
-                  <div className="text-sm font-medium text-slate-700 truncate">{d.nombre || d.tipo}</div>
+                  <div className="text-sm font-medium text-slate-700 truncate">
+                    {d.nombre || d.tipo}
+                    {esOculto(d) ? <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded-full bg-slate-200 text-slate-600 inline-flex items-center gap-1 align-middle"><EyeOff size={10} /> oculto</span> : null}
+                  </div>
                   <div className="text-xs text-slate-400">{d.tipo} · {fmtFecha(d.fecha)}</div>
                 </div>
                 {d.url ? <a href={d.url} target="_blank" rel="noreferrer" className="text-slate-400 hover:text-[#b8965a]"><Link2 size={16} /></a> : null}
+                <IconBtn onClick={() => onAlternarDocumento(d)} icon={esOculto(d) ? EyeOff : Eye}
+                  title={esOculto(d) ? "Oculto para el codesarrollador — clic para mostrarlo" : "Visible para el codesarrollador — clic para ocultarlo"} />
+                <IconBtn onClick={() => onEditarDocumento(d)} icon={Pencil} title="Editar" />
                 <IconBtn onClick={() => onEliminarDocumento(d)} icon={Trash2} title="Eliminar" danger />
               </li>
             ))}
