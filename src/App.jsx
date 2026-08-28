@@ -2396,6 +2396,14 @@ function AdminApp({ pass, onLogout }) {
     { id: "calculadora", label: "Calculadora", icon: Calculator },
   ];
 
+  // Que pestana del Sheet corresponde a cada vista del panel, para poder saltar
+  // directo a la hoja exacta en vez de abrir el Sheet y buscarla.
+  const HOJA_DE_VISTA = {
+    inversionistas: "Inversionistas", proyectos: "Proyectos", inversiones: "Inversiones",
+    pagos: "Aportaciones", asesores: "Asesores", referidos: "Referidos",
+  };
+  const hojaDeEstaVista = data?.sheet?.tabs ? data.sheet.tabs[HOJA_DE_VISTA[vista]] : null;
+
   // Abrir modal de creacion con valores por defecto
   const nuevoRegistro = (tab, base = {}) => {
     const bases = {
@@ -2431,6 +2439,21 @@ function AdminApp({ pass, onLogout }) {
             >
               <Plus size={14} /> <span className="hidden sm:inline">Nuevo Codesarrollador</span><span className="sm:hidden">Nuevo</span>
             </button>
+            {/* Ir directo a la FUENTE. El Sheet es lo que manda; esto solo evita
+                andarlo buscando. La URL la manda el backend y SOLO en la respuesta
+                de admin: el repo del portal es publico y el id del Sheet no tiene
+                por que estar en el bundle. Nadie que no sea admin ve este boton. */}
+            {data?.sheet?.url ? (
+              <a
+                href={data.sheet.url}
+                target="_blank"
+                rel="noreferrer"
+                title="Abrir el Google Sheet que controla este board"
+                className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700"
+              >
+                <FileText size={14} /> <span className="hidden sm:inline">Abrir el Sheet</span>
+              </a>
+            ) : null}
             <button
               onClick={() => cargar()}
               disabled={cargando}
@@ -2464,6 +2487,17 @@ function AdminApp({ pass, onLogout }) {
                 </button>
               );
             })}
+            {hojaDeEstaVista ? (
+              <a
+                href={hojaDeEstaVista}
+                target="_blank"
+                rel="noreferrer"
+                title="Abrir esta misma hoja en el Sheet"
+                className="ml-auto flex items-center gap-1.5 px-3 py-2.5 text-xs whitespace-nowrap text-slate-500 hover:text-[#c9a96e] transition"
+              >
+                <Link2 size={14} /> <span className="hidden sm:inline">Ver esta hoja en el Sheet</span>
+              </a>
+            ) : null}
           </div>
         </div>
       </header>
