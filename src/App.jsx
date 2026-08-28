@@ -4128,12 +4128,23 @@ function InvestorApp({ clave, onLogout, onClaveCambiada }) {
     toastTimer.current = setTimeout(() => setToast(null), 3000);
   }, []);
 
+  // Avance de obra: se pide APARTE, despues de que el portal ya cargo. Leerlo
+  // dentro de getMine hacia esperar al codesarrollador por un dato secundario.
+  const [obras, setObras] = useState({}); // proyectoId -> resumen de obra
+
   const cargar = useCallback(async () => {
     setCargando(true); setError("");
     if (!BACKEND_LISTO) { setData(DEMO_DATA); setCargando(false); return; }
     try {
       const res = await apiCall("getMine", { clave });
       setData(res.data);
+      // No se espera: si tarda, el portal ya esta a la vista y el bloque aparece solo.
+      const ids = [...new Set(arr(res.data?.inversiones).map(i => String(i.proyectoId || "")).filter(Boolean))];
+      ids.forEach((pid) => {
+        apiCall("obraProyecto", { clave, proyectoId: pid })
+          .then((r) => { if (r && r.obra) setObras((prev) => ({ ...prev, [pid]: r.obra })); })
+          .catch(() => { /* el bloque simplemente no se pinta */ });
+      });
     } catch (err) {
       setError(err.message || "No se pudo cargar tu cartera.");
       // Si la clave ya no es valida (la rotaron), cerrar sesion para no quedar atorado.
@@ -4443,17 +4454,17 @@ function InvestorApp({ clave, onLogout, onClaveCambiada }) {
                       {/* AVANCE MEDIDO, no narrado. Viene del motor de obra (concepto x
                           precio unitario), no de una captura aparte. Un frente en 0% CON
                           freno tiene culpable; uno en 0% SIN freno es que nadie lo empezo. */}
-                      {proyecto?.obra && num(proyecto.obra.importe) > 0 ? (
+                      {obras[String(iv.proyectoId)] && num(obras[String(iv.proyectoId)].importe) > 0 ? (
                         <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50/70 p-3.5">
                           <div className="flex items-baseline justify-between gap-2 flex-wrap mb-2">
                             <span className="text-xs font-semibold text-slate-600">Avance medido de la obra</span>
-                            <span className="text-xs tabular-nums text-slate-500">{money(proyecto.obra.ejecutado)} de {money(proyecto.obra.importe)} · {pct(proyecto.obra.avance_pct)}</span>
+                            <span className="text-xs tabular-nums text-slate-500">{money(obras[String(iv.proyectoId)].ejecutado)} de {money(obras[String(iv.proyectoId)].importe)} · {pct(obras[String(iv.proyectoId)].avance_pct)}</span>
                           </div>
                           <div className="h-2 rounded-full overflow-hidden bg-slate-200 mb-3">
-                            <div className="h-full rounded-full" style={{ width: `${Math.min(100, num(proyecto.obra.avance_pct))}%`, background: "linear-gradient(90deg,#c9a96e,#e0c590)" }} />
+                            <div className="h-full rounded-full" style={{ width: `${Math.min(100, num(obras[String(iv.proyectoId)].avance_pct))}%`, background: "linear-gradient(90deg,#c9a96e,#e0c590)" }} />
                           </div>
                           <div className="space-y-1.5">
-                            {arr(proyecto.obra.frentes).slice(0, 6).map((f) => (
+                            {arr(obras[String(iv.proyectoId)].frentes).slice(0, 6).map((f) => (
                               <div key={f.frente} className="flex items-center gap-2.5 text-xs">
                                 <span className="flex-1 truncate text-slate-600">{f.frente}</span>
                                 {num(f.frenos) > 0 ? (
@@ -4468,7 +4479,7 @@ function InvestorApp({ clave, onLogout, onClaveCambiada }) {
                               </div>
                             ))}
                           </div>
-                          {num(proyecto.obra.ejecutado) === 0 ? (
+                          {num(obras[String(iv.proyectoId)].ejecutado) === 0 ? (
                             <div className="text-[11px] text-slate-400 mt-2.5">El presupuesto ya esta cargado por frente; el avance se empieza a medir en cuanto la obra reporte lo ejecutado.</div>
                           ) : null}
                         </div>
