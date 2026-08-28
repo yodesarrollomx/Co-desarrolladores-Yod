@@ -240,6 +240,15 @@ async function descargarEstadoCuentaPDF({ inv, inversionista, proyecto, aportaci
       kpis = rend.sinPrecios ? [
         { l: "Plusvalia por etapa", v: "Datos de precio pendientes" },
         { l: liquidada ? "Total recibido (salida)" : "Valor hoy (capital aportado)", v: money(rend.totalARecibir) },
+      ] : rend.conAnual ? [
+        // Modelo combinado: el estado de cuenta desglosa las dos fuentes para que el
+        // codesarrollador vea de donde sale cada peso y pueda cuadrarlo con su contrato.
+        { l: "Plusvalia (" + rend.etapaActualLabel + ", " + pct(rend.pctPlusHoy) + ")", v: money(rend.gananciaPlus) },
+        { l: "Rendimiento anual (" + pct(rend.tasa) + ", " + rend.dias + " dias)", v: money(rend.gananciaAnual) },
+        { l: "Ganancia a hoy (suma)", v: money(rend.ganancia) },
+        { l: "Precio de entrada", v: money(rend.precioEntrada) + "/m²" },
+        { l: liquidada ? "Total recibido (salida)" : "Valor hoy (sobre lo aportado)", v: money(rend.totalARecibir) },
+        { l: rend.hayUpside ? ("Total al vender (" + rend.etapaProyLabel + ", " + pct(rend.rendPctFinal) + ")") : "Valor estimado actual", v: money(rend.totalFinal) },
       ] : [
         { l: "Plusvalia (" + rend.etapaActualLabel + ")", v: pct(rend.rendimientoPct) },
         { l: "Precio de entrada", v: money(rend.precioEntrada) + "/m²" },
@@ -517,14 +526,44 @@ function calcularRendimientoInversion(inv, capitalRecibido, precios, proyecto) {
       const etapaProyLabel = liq ? "Salida" : ((pVentaRaw > 0 && pVentaRaw > pActual) ? "Venta" : etiquetaEtapaPlusvalia(etapaAct));
       const factorHoy = pActual / pEntrada;
       const factorFin = pProy / pEntrada;
-      const totalARecibir = recibido * factorHoy;
-      const totalFinal = monto * factorFin;
+
+      // MODELO COMBINADO (decision de Alejandro, 27-ago-2026): en Real Miramar el
+      // codesarrollador gana las DOS cosas juntas: la plusvalia por etapa del terreno
+      // MAS el rendimiento anual pactado sobre su capital. Antes la rama de plusvalia
+      // retornaba aqui e IGNORABA en silencio la tasa capturada (17.6% en
+      // RM-ME-2025-01), asi que el portal mostraba solo una de las dos.
+      // Si la inversion no trae tasa, el resultado es identico al de antes.
+      const tasaMix = Math.max(0, Number(inv.tasaAnual) || 0);
+      const corteMix = fechaCorteRendimiento(inv);
+      const finMix = inv.fechaSalida && String(inv.fechaSalida).trim() ? String(inv.fechaSalida).trim() : corteMix;
+      const diasMix = diasEntre(inv.fechaInicio, corteMix);
+      const diasMixTotal = diasEntre(inv.fechaInicio, finMix);
+      const pctAnualHoy = tasaMix > 0 ? diasMix * (tasaMix / 365) : 0;
+      const pctAnualFin = tasaMix > 0 ? diasMixTotal * (tasaMix / 365) : 0;
+
+      const gananciaPlus = recibido * (factorHoy - 1);
+      const gananciaAnual = recibido * (pctAnualHoy / 100);
+      const ganancia = gananciaPlus + gananciaAnual;
+      const totalARecibir = recibido + ganancia;
+
+      const gananciaPlusFin = monto * (factorFin - 1);
+      const gananciaAnualFin = monto * (pctAnualFin / 100);
+      const gananciaFinal = gananciaPlusFin + gananciaAnualFin;
+      const totalFinal = monto + gananciaFinal;
+
       return {
         ...baseP, sinPrecios: false, hayVenta, etapaProyLabel,
         hayUpside: !liq && totalFinal > totalARecibir + 0.5,
         precioActual: pActual, precioVenta: pProy,
-        rendimientoPct: (factorHoy - 1) * 100, ganancia: totalARecibir - recibido, totalARecibir,
-        rendPctFinal: (factorFin - 1) * 100, gananciaFinal: totalFinal - monto, totalFinal,
+        // Desglose para que el portal pueda explicar de donde sale cada peso.
+        conAnual: tasaMix > 0, tasa: tasaMix, dias: diasMix, diasTotal: diasMixTotal,
+        pctPlusHoy: (factorHoy - 1) * 100, pctAnualHoy,
+        pctPlusFin: (factorFin - 1) * 100, pctAnualFin,
+        gananciaPlus, gananciaAnual, gananciaPlusFin, gananciaAnualFin,
+        rendimientoPct: recibido > 0 ? (ganancia / recibido) * 100 : (factorHoy - 1) * 100,
+        ganancia, totalARecibir,
+        rendPctFinal: monto > 0 ? (gananciaFinal / monto) * 100 : (factorFin - 1) * 100,
+        gananciaFinal, totalFinal,
       };
     }
     // Falta el precio de entrada (a mano) o el precio de la etapa actual: avisar.
@@ -1582,19 +1621,12 @@ function InversionForm({ value, onChange, inversionistas, proyectos, precios, es
         <Field label="Monto total comprometido">
           <Input type="number" min="0" value={value.montoTotal || ""} onChange={(e) => set("montoTotal", e.target.value)} placeholder="1000000" />
         </Field>
-        {/* En proyectos de plusvalia la tasa anual NO se usa: calcularRendimientoInversion
-            sale por la rama de plusvalia y nunca lee tasaAnual ni tramos. Dejar el campo
-            visible hacia que se capturaran los dos modelos a la vez (RM-ME-2025-01 tiene
-            tasaAnual 17.6 Y precioEntrada 4050) y el sistema elegia uno en silencio. */}
-        {!esPlusvalia ? (
-          <Field label="Tasa anual (%)">
-            <Input type="number" min="0" value={value.tasaAnual ?? TASA_DEFAULT} onChange={(e) => set("tasaAnual", e.target.value)} step="0.1" />
-          </Field>
-        ) : (
-          <Field label="Tasa anual (%)" hint="No aplica: este proyecto rinde por plusvalia de etapa.">
-            <div className="h-[38px] flex items-center px-3 rounded-lg border border-dashed border-slate-200 bg-slate-50 text-sm text-slate-400">No aplica</div>
-          </Field>
-        )}
+        {/* En proyectos de plusvalia la tasa SI cuenta: el codesarrollador gana las dos
+            cosas juntas (plusvalia de etapa + rendimiento anual). Deja la tasa en 0 si
+            esta inversion solo va por plusvalia. Los TRAMOS, en cambio, no aplican aqui. */}
+        <Field label="Tasa anual (%)" hint={esPlusvalia ? "Se SUMA a la plusvalia de etapa. Pon 0 si esta inversion solo gana plusvalia." : undefined}>
+          <Input type="number" min="0" value={value.tasaAnual ?? TASA_DEFAULT} onChange={(e) => set("tasaAnual", e.target.value)} step="0.1" />
+        </Field>
         <Field label="Fecha de inicio" hint="Arranca el conteo de dias del rendimiento.">
           <Input type="date" value={toDateInput(value.fechaInicio)} onChange={(e) => set("fechaInicio", e.target.value)} />
         </Field>
@@ -1607,20 +1639,24 @@ function InversionForm({ value, onChange, inversionistas, proyectos, precios, es
       </Field>
       {!esPlusvalia ? <TramosEditor value={value.tramos || ""} onChange={(v) => set("tramos", v)} /> : null}
 
-      {/* Aviso de DOBLE MODELO: si un proyecto de plusvalia trae ademas tasa o tramos
-          capturados, el portal escoge plusvalia sin decirlo y el numero que ve el
-          codesarrollador deja de ser el de su contrato. */}
-      {esPlusvalia && (num(value.tasaAnual) > 0 || String(value.tramos || "").trim()) ? (
+      {/* Los TRAMOS si quedan ignorados en un proyecto de plusvalia: el retorno por mes
+          de venta y la plusvalia por etapa son dos formas distintas de contar lo mismo. */}
+      {esPlusvalia && String(value.tramos || "").trim() ? (
         <div className="rounded-xl border border-red-200 bg-red-50 p-3 flex items-start gap-2">
           <AlertCircle size={16} className="text-red-600 shrink-0 mt-0.5" />
           <div className="text-sm text-red-900">
-            <b>Esta inversion tiene dos modelos capturados a la vez.</b> El proyecto es de plusvalia,
-            pero la fila trae {num(value.tasaAnual) > 0 ? <>tasa anual <b>{value.tasaAnual}%</b></> : null}
-            {num(value.tasaAnual) > 0 && String(value.tramos || "").trim() ? " y " : null}
-            {String(value.tramos || "").trim() ? <b>tramos</b> : null}.
-            El portal muestra el valor por <b>plusvalia</b> e ignora lo demas. Si el contrato dice otra cosa,
-            el codesarrollador esta viendo un numero que no es el suyo.
+            <b>Esta inversion trae tramos capturados y el proyecto es de plusvalia.</b> Los tramos
+            se <b>ignoran</b>: aqui el valor sale de la plusvalia de etapa mas la tasa anual.
+            Borra los tramos para que la fila diga lo mismo que el contrato.
           </div>
+        </div>
+      ) : null}
+
+      {/* Resumen de lo que va a ver el codesarrollador con lo capturado. */}
+      {esPlusvalia ? (
+        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
+          Este codesarrollador gana <b>plusvalia de etapa</b>
+          {num(value.tasaAnual) > 0 ? <> <b>mas</b> el <b>{value.tasaAnual}% anual</b> sobre su capital. Las dos cosas se suman.</> : <> unicamente (tasa anual en 0).</>}
         </div>
       ) : null}
 
@@ -3907,7 +3943,28 @@ function ComoCalculaModal({ info, onClose }) {
       <>
         <p>Tu inversion es en <b>terreno</b>: su valor sube por <b>etapas de precio</b> conforme avanza el proyecto.</p>
         <p className="mt-2">Entraste a <b>{money(r.precioEntrada)}/m²</b> y hoy <b>{info.proyectoNombre}</b> va en la etapa <b>{r.etapaActualLabel}</b>{r.precioActual ? <> (<b>{money(r.precioActual)}/m²</b>)</> : null}.</p>
-        <p className="mt-2">Por eso: <b>valor hoy = lo que aportaste × (precio actual ÷ tu precio de entrada)</b>. Cuando el proyecto sube de etapa, tu valor sube tambien.</p>
+        {r.conAnual ? (
+          <>
+            <p className="mt-2">Tu contrato te da <b>las dos cosas juntas</b>, y se suman:</p>
+            <div className="mt-2 rounded-xl border border-slate-200 overflow-hidden">
+              <div className="flex items-center justify-between px-3 py-2 bg-slate-50">
+                <span><b>1 · Plusvalia del terreno</b><br /><span className="text-xs text-slate-400">lo aportado × (precio de hoy ÷ tu precio de entrada)</span></span>
+                <span className="font-semibold tabular-nums whitespace-nowrap ml-3">{money(r.gananciaPlus)}</span>
+              </div>
+              <div className="flex items-center justify-between px-3 py-2 border-t border-slate-100">
+                <span><b>2 · Rendimiento anual {pct(r.tasa)}</b><br /><span className="text-xs text-slate-400">sobre tu capital, contado por dia · llevas {r.dias} dias</span></span>
+                <span className="font-semibold tabular-nums whitespace-nowrap ml-3">{money(r.gananciaAnual)}</span>
+              </div>
+              <div className="flex items-center justify-between px-3 py-2 border-t border-slate-200 bg-slate-50">
+                <span><b>Ganancia a hoy</b></span>
+                <span className="font-semibold tabular-nums whitespace-nowrap ml-3" style={{ color: "#8a6d1e" }}>{money(r.ganancia)}</span>
+              </div>
+            </div>
+            <p className="mt-2">Cuando el proyecto sube de etapa, sube la parte 1; la parte 2 crece sola con los dias.</p>
+          </>
+        ) : (
+          <p className="mt-2">Por eso: <b>valor hoy = lo que aportaste × (precio actual ÷ tu precio de entrada)</b>. Cuando el proyecto sube de etapa, tu valor sube tambien.</p>
+        )}
       </>
     );
   } else if (r.modo === "tramos") {
@@ -4144,6 +4201,9 @@ function InvestorApp({ clave, onLogout, onClaveCambiada }) {
                       <TrendingUp size={15} /> {rend.modo === "plusvalia" ? (rend.sinPrecios ? <>Plusvalia en configuracion</> : <>+{pct(rend.rendimientoPct)} · etapa {rend.etapaActualLabel}</>) : rend.modo === "tramos" ? (liquidada ? <>+{pct(rend.rendimientoPct)} al vender (mes {rend.mesFin})</> : <>+{pct(rend.rendimientoPct)} si se vende hoy</>) : <>+{pct(rend.rendimientoPct)} · {rend.dias} dias</>}
                     </div>
                     <div className="text-xs text-white/40 mt-3">Aportado hasta hoy {money(recibido)}{recibido < monto ? ` · comprometido ${money(monto)}` : ""} · ganancia a hoy {money(ganancia)}</div>
+                    {rend.conAnual ? (
+                      <div className="text-[11px] text-white/40 mt-0.5">Plusvalia {money(rend.gananciaPlus)} + rendimiento anual {pct(rend.tasa)} {money(rend.gananciaAnual)}</div>
+                    ) : null}
                     {!liquidada ? <div className="text-[10px] text-white/30 mt-1">Es una estimacion al dia de hoy, no dinero disponible para retirar; se realiza al vender o devolver tu capital.</div> : null}
                     <button onClick={() => setComoModal({ rend, proyectoNombre: proyecto?.nombre || "tu inversion" })} className="mt-2 text-[11px] inline-flex items-center gap-1 underline" style={{ color: "rgba(201,169,110,0.9)" }}><AlertCircle size={12} /> ¿Como se calcula mi valor?</button>
                     {!liquidada && rend.totalFinal > rend.totalARecibir && !(rend.modo === "plusvalia" && rend.sinPrecios) ? (
