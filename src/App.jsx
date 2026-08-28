@@ -147,7 +147,7 @@ async function descargarEstadoCuentaPDF({ inv, inversionista, proyecto, aportaci
     const comprometido = monto || programado;
     const porRecibir = Math.max(0, comprometido - recibido);
     const liquidada = (inv.estado || "Activa") === "Liquidada";
-    const rend = calcularRendimientoInversion(inv, recibido, precios, proyecto);
+    const rend = calcularRendimientoInversion(inv, recibido, precios, proyecto, aps);
 
     const GOLD = [201, 169, 110], INK = [26, 20, 9], GREEN = [15, 122, 61], RED = [180, 35, 24], BLUE = [29, 78, 216], MUTED = [120, 120, 120], LABEL = [138, 109, 30];
     const doc = new jsPDF({ unit: "pt", format: "a4" });
@@ -490,7 +490,7 @@ function pctTramo(tramos, mesEnCurso) {
   return mejor ? mejor.pct : 0;
 }
 
-function calcularRendimientoInversion(inv, capitalRecibido, precios, proyecto) {
+function calcularRendimientoInversion(inv, capitalRecibido, precios, proyecto, aportaciones) {
   const monto = num(inv.montoTotal);
   const recibido = num(capitalRecibido);
 
@@ -584,7 +584,25 @@ function calcularRendimientoInversion(inv, capitalRecibido, precios, proyecto) {
     const mesFin = mesParaTramo(inv.fechaInicio, finProy);   // mes de venta esperado
     const pctHoy = pctTramo(tramos, mesHoy);
     const pctFin = pctTramo(tramos, mesFin);
-    const ganancia = recibido * (pctHoy / 100);        // si se vende hoy: sobre lo aportado
+
+    // GANANCIA POR TRAMOS, PONDERADA POR CUANDO ENTRO CADA PESO.
+    //  Antes era `recibido * pctHoy`: se aplicaba el % del mes de la INVERSION a
+    //  todo el capital, sin importar si una aportacion llevaba ocho meses en la
+    //  obra o habia entrado ayer. Con eso, depositar el saldo un dia antes de la
+    //  fecha de salida cobraba el tramo completo sobre dinero que estuvo un dia.
+    //  Ahora cada aportacion recibida devenga el % del tramo que le toca por los
+    //  meses que ELLA estuvo. Si no llegan las aportaciones (llamadas viejas),
+    //  se conserva el calculo anterior para no romper nada.
+    const apsRec = arr(aportaciones).filter(a => estadoAportacion(a) === "Recibida");
+    let ganancia;
+    if (apsRec.length) {
+      ganancia = apsRec.reduce((acc, a) => {
+        const mesesDeEsta = mesParaTramo(a.fechaRecibida, corte);
+        return acc + num(a.monto) * (pctTramo(tramos, mesesDeEsta) / 100);
+      }, 0);
+    } else {
+      ganancia = recibido * (pctHoy / 100);
+    }
     const totalARecibir = recibido + ganancia;
     const gananciaFinal = monto * (pctFin / 100);      // proyeccion: sobre el comprometido
     const totalFinal = monto + gananciaFinal;
@@ -623,6 +641,24 @@ function estadoAportacion(ap) {
     if (prog < hoy) return "Vencida";
   }
   return "Pendiente";
+}
+
+// Edad de un dato, en dias. El portal debe DECIR cuando lo que muestra ya esta
+// viejo: un tablero que se ve igual de bien con datos frescos que con datos
+// muertos no sirve. La hoja Documentos se vacio el 3-ago y nadie se entero en 24
+// dias justamente porque el silencio era invisible.
+function diasDesde(fechaISO) {
+  const d = parseDate(fechaISO);
+  if (!d) return null;
+  const hoy = parseDate(todayISO());
+  if (!hoy) return null;
+  return Math.max(0, Math.round((hoy - d) / 86400000));
+}
+// Etiqueta lista para pintar: null si el dato esta fresco o no tiene fecha.
+function edadTexto(fechaISO, umbral = 30) {
+  const n = diasDesde(fechaISO);
+  if (n === null || n < umbral) return null;
+  return n < 60 ? `actualizado hace ${n} dias` : `sin actualizar desde ${fmtFecha(fechaISO)}`;
 }
 
 // ¿Esta fila esta escondida del portal del codesarrollador?
@@ -2283,6 +2319,17 @@ function AdminApp({ pass, onLogout }) {
     const real = num(reportado);
     try {
       await guardarFila("Aportaciones", { ...a, monto: real, fechaRecibida: todayISO() });
+      // Avisarle al codesarrollador que su pago quedo aplicado. Antes no se le
+      // avisaba de NADA: su unica forma de enterarse era abrir el portal a
+      // adivinar. Si falla el aviso no se revierte el pago; solo se dice.
+      try {
+        const av = await apiCall("notificarPago", { pass, aportacionId: a.id });
+        if (av && Number(av.sinCorreo) > 0) {
+          notificar("Pago guardado, pero el codesarrollador no tiene correo registrado: no se le pudo avisar.", "info");
+        }
+      } catch (e) {
+        notificar("Pago guardado. No se pudo enviar el aviso por correo.", "info");
+      }
       const resto = Math.round((programado - real) * 100) / 100;
       if (resto > 0.5) {
         await guardarFila("Aportaciones", {
@@ -3283,7 +3330,7 @@ function DetalleInversion({
   const monto = num(inv.montoTotal);
 
   // Rendimiento REAL: valor hoy sobre lo APORTADO (desde el inicio) + proyeccion al final.
-  const rend = calcularRendimientoInversion(inv, recibido, data.preciosPlusvalia, proyecto);
+  const rend = calcularRendimientoInversion(inv, recibido, data.preciosPlusvalia, proyecto, aportaciones);
 
   return (
     <div className="space-y-5">
@@ -4129,8 +4176,9 @@ function InvestorApp({ clave, onLogout, onClaveCambiada }) {
     let totalInvertido = 0, valorHoy = 0, totalFinal = 0, enConfig = 0;
     const proyectosSet = new Set();
     inversiones.forEach((iv) => {
-      const recibidoIv = aportacionesDeFolio(iv.folio).filter(a => estadoAportacion(a) === "Recibida").reduce((s, a) => s + num(a.monto), 0);
-      const rend = calcularRendimientoInversion(iv, recibidoIv, data?.preciosPlusvalia, proyectoPorId(iv.proyectoId));
+      const apsIv = aportacionesDeFolio(iv.folio);
+      const recibidoIv = apsIv.filter(a => estadoAportacion(a) === "Recibida").reduce((s, a) => s + num(a.monto), 0);
+      const rend = calcularRendimientoInversion(iv, recibidoIv, data?.preciosPlusvalia, proyectoPorId(iv.proyectoId), apsIv);
       // No mezclar: las inversiones plusvalia sin precio aun no tienen valor; se excluyen del consolidado.
       if (rend.modo === "plusvalia" && rend.sinPrecios) { enConfig++; if (iv.proyectoId) proyectosSet.add(String(iv.proyectoId)); return; }
       totalInvertido += rend.recibido;
@@ -4232,7 +4280,7 @@ function InvestorApp({ clave, onLogout, onClaveCambiada }) {
               const aps = aportacionesDeFolio(iv.folio).map(a => reportes[a.id] ? { ...a, ...reportes[a.id] } : a);
               const recibido = aps.filter(a => estadoAportacion(a) === "Recibida").reduce((s, a) => s + num(a.monto), 0);
               const monto = num(iv.montoTotal);
-              const rend = calcularRendimientoInversion(iv, recibido, data?.preciosPlusvalia, proyecto);
+              const rend = calcularRendimientoInversion(iv, recibido, data?.preciosPlusvalia, proyecto, aps);
               const ganancia = rend.ganancia;
               const pagosRecibidos = aps.filter(a => estadoAportacion(a) === "Recibida").length;
               const proximo = aps.find(a => estadoAportacion(a) !== "Recibida");
@@ -4388,7 +4436,44 @@ function InvestorApp({ clave, onLogout, onClaveCambiada }) {
                         <HardHat size={17} style={{ color: "#c9a96e" }} />
                         <h3 className="font-semibold text-slate-800">Avance de tu proyecto</h3>
                         {proyecto?.etapaActual ? <span className="text-[10px] px-2 py-0.5 rounded-full" style={{ background: "rgba(201,169,110,0.16)", color: "#7a5e1e" }}>Etapa: {proyecto.etapaActual}</span> : null}
+                        {edadTexto(avances[0]?.fecha) ? (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full ml-auto" style={{ background: "#fef3c7", color: "#92400e" }}>{edadTexto(avances[0]?.fecha)}</span>
+                        ) : null}
                       </div>
+                      {/* AVANCE MEDIDO, no narrado. Viene del motor de obra (concepto x
+                          precio unitario), no de una captura aparte. Un frente en 0% CON
+                          freno tiene culpable; uno en 0% SIN freno es que nadie lo empezo. */}
+                      {proyecto?.obra && num(proyecto.obra.importe) > 0 ? (
+                        <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50/70 p-3.5">
+                          <div className="flex items-baseline justify-between gap-2 flex-wrap mb-2">
+                            <span className="text-xs font-semibold text-slate-600">Avance medido de la obra</span>
+                            <span className="text-xs tabular-nums text-slate-500">{money(proyecto.obra.ejecutado)} de {money(proyecto.obra.importe)} · {pct(proyecto.obra.avance_pct)}</span>
+                          </div>
+                          <div className="h-2 rounded-full overflow-hidden bg-slate-200 mb-3">
+                            <div className="h-full rounded-full" style={{ width: `${Math.min(100, num(proyecto.obra.avance_pct))}%`, background: "linear-gradient(90deg,#c9a96e,#e0c590)" }} />
+                          </div>
+                          <div className="space-y-1.5">
+                            {arr(proyecto.obra.frentes).slice(0, 6).map((f) => (
+                              <div key={f.frente} className="flex items-center gap-2.5 text-xs">
+                                <span className="flex-1 truncate text-slate-600">{f.frente}</span>
+                                {num(f.frenos) > 0 ? (
+                                  <span className="px-1.5 py-0.5 rounded-full text-[10px] shrink-0" style={{ background: "#fee2e2", color: "#b91c1c" }}>
+                                    {f.frenos === 1 ? "1 freno" : `${f.frenos} frenos`}
+                                  </span>
+                                ) : null}
+                                <span className="w-14 h-1.5 rounded-full bg-slate-200 overflow-hidden shrink-0">
+                                  <span className="block h-full rounded-full" style={{ width: `${Math.min(100, num(f.avance_pct))}%`, background: num(f.frenos) > 0 ? "#dc2626" : "#c9a96e" }} />
+                                </span>
+                                <span className="w-10 text-right tabular-nums text-slate-400 shrink-0">{pct(f.avance_pct)}</span>
+                              </div>
+                            ))}
+                          </div>
+                          {num(proyecto.obra.ejecutado) === 0 ? (
+                            <div className="text-[11px] text-slate-400 mt-2.5">El presupuesto ya esta cargado por frente; el avance se empieza a medir en cuanto la obra reporte lo ejecutado.</div>
+                          ) : null}
+                        </div>
+                      ) : null}
+
                       {avances.length === 0 ? (
                         <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/60 p-4 text-center">
                           <HardHat size={22} className="mx-auto mb-1.5 text-slate-300" />
@@ -4432,6 +4517,9 @@ function InvestorApp({ clave, onLogout, onClaveCambiada }) {
                       <div className="flex items-center gap-2 mb-4">
                         <MessageCircle size={17} style={{ color: "#c9a96e" }} />
                         <h3 className="font-semibold text-slate-800">Seguimiento del asesor inmobiliario</h3>
+                        {edadTexto(bitacora[0]?.fecha) ? (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full ml-auto" style={{ background: "#fef3c7", color: "#92400e" }}>{edadTexto(bitacora[0]?.fecha)}</span>
+                        ) : null}
                       </div>
                       <ol className="relative border-l border-slate-200 ml-1.5 space-y-5">
                         {bitacora.map((b) => (
