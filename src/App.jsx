@@ -3943,6 +3943,38 @@ function ComoCalculaModal({ info, onClose }) {
       <>
         <p>Tu inversion es en <b>terreno</b>: su valor sube por <b>etapas de precio</b> conforme avanza el proyecto.</p>
         <p className="mt-2">Entraste a <b>{money(r.precioEntrada)}/m²</b> y hoy <b>{info.proyectoNombre}</b> va en la etapa <b>{r.etapaActualLabel}</b>{r.precioActual ? <> (<b>{money(r.precioActual)}/m²</b>)</> : null}.</p>
+        {/* La escalera con su denominador: en que escalon vamos, cuantos tramites
+            sostienen cada uno, y como se llaman las puertas que faltan. Es el mismo
+            dato del board de tramites; aqui deja de ser invisible. */}
+        {info.escalera && info.escalera.length ? (
+          <div className="mt-3 rounded-xl border border-slate-200 overflow-hidden">
+            {info.escalera.map((e) => {
+              const esHoy = e.hito_id === info.etapaActualId;
+              const listo = e.total > 0 && e.verde === e.total;
+              return (
+                <div key={e.hito_id} className="flex items-center justify-between gap-3 px-3 py-2 border-b border-slate-100 last:border-0"
+                  style={{ background: esHoy ? "rgba(201,169,110,0.10)" : undefined }}>
+                  <div className="min-w-0">
+                    <div className="text-sm" style={{ color: esHoy ? "#7a5e1e" : "#475569", fontWeight: esHoy ? 600 : 400 }}>
+                      {e.nombre || e.hito_id}{esHoy ? " · aqui vamos" : ""}
+                    </div>
+                    {e.total > 0 ? (
+                      <div className="text-[11px]" style={{ color: listo ? "#15803d" : e.verde === 0 ? "#b91c1c" : "#94a3b8" }}>
+                        {e.verde} de {e.total} tramites {listo ? "· completa" : "completados"}
+                      </div>
+                    ) : null}
+                  </div>
+                  {e.precio_m2 ? <div className="text-sm tabular-nums text-slate-500 whitespace-nowrap">{money(e.precio_m2)}/m²</div> : null}
+                </div>
+              );
+            })}
+          </div>
+        ) : null}
+        {info.puertas && info.puertas.length ? (
+          <div className="mt-2 text-xs text-slate-500">
+            <b className="text-slate-700">Lo que falta para cerrar esta etapa:</b> {info.puertas.join(" · ")}
+          </div>
+        ) : null}
         {r.conAnual ? (
           <>
             <p className="mt-2">Tu contrato te da <b>las dos cosas juntas</b>, y se suman:</p>
@@ -4204,8 +4236,22 @@ function InvestorApp({ clave, onLogout, onClaveCambiada }) {
                     {rend.conAnual ? (
                       <div className="text-[11px] text-white/40 mt-0.5">Plusvalia {money(rend.gananciaPlus)} + rendimiento anual {pct(rend.tasa)} {money(rend.gananciaAnual)}</div>
                     ) : null}
+                    {/* El DENOMINADOR de la etapa. Anunciar "etapa Preventa I" sin decir
+                        cuantos tramites la sostienen es media verdad; el dato ya viaja
+                        desde el board de tramites, solo hay que no esconderlo. */}
+                    {proyecto?.tramitesEtapa && num(proyecto.tramitesEtapa.total) > 0 ? (
+                      <div className="text-[11px] mt-1.5" style={{ color: proyecto.tramitesEtapa.verde === 0 ? "rgba(252,165,165,0.85)" : "rgba(201,169,110,0.8)" }}>
+                        Esta etapa lleva <b>{proyecto.tramitesEtapa.verde} de {proyecto.tramitesEtapa.total}</b> tramites completados
+                      </div>
+                    ) : null}
                     {!liquidada ? <div className="text-[10px] text-white/30 mt-1">Es una estimacion al dia de hoy, no dinero disponible para retirar; se realiza al vender o devolver tu capital.</div> : null}
-                    <button onClick={() => setComoModal({ rend, proyectoNombre: proyecto?.nombre || "tu inversion" })} className="mt-2 text-[11px] inline-flex items-center gap-1 underline" style={{ color: "rgba(201,169,110,0.9)" }}><AlertCircle size={12} /> ¿Como se calcula mi valor?</button>
+                    <button onClick={() => setComoModal({
+                      rend,
+                      proyectoNombre: proyecto?.nombre || "tu inversion",
+                      escalera: arr(proyecto?.escaleraTramites),
+                      etapaActualId: proyecto?.etapaPrecio || "",
+                      puertas: arr(proyecto?.tramitesEtapa?.puertas),
+                    })} className="mt-2 text-[11px] inline-flex items-center gap-1 underline" style={{ color: "rgba(201,169,110,0.9)" }}><AlertCircle size={12} /> ¿Como se calcula mi valor?</button>
                     {!liquidada && rend.totalFinal > rend.totalARecibir && !(rend.modo === "plusvalia" && rend.sinPrecios) ? (
                       <div className="mt-2 text-[11px]" style={{ color: "rgba(201,169,110,0.85)" }}>{rend.modo === "plusvalia" ? <>Al vender (etapa {rend.etapaProyLabel}): ≈ {money(rend.totalFinal)} (+{pct(rend.rendPctFinal)})</> : rend.modo === "tramos" ? <>Al vender la casa (mes {rend.mesFin}): ≈ {money(rend.totalFinal)} (+{pct(rend.rendPctFinal)})</> : <>Al completar tu inversion{iv.fechaSalida ? ` (al ${fmtFecha(iv.fechaSalida)})` : ""}: ≈ {money(rend.totalFinal)}</>}</div>
                     ) : null}
