@@ -668,6 +668,14 @@ function edadTexto(fechaISO, umbral = 30) {
 function esOculto(row) {
   return String(row?.visibilidad || "").trim().toLowerCase() === "oculto";
 }
+// La BITACORA va al reves a proposito: nace oculta y solo sale si dice
+// "publicar". Es la unica hoja que falla del lado seguro, y hace falta: el
+// 28-ago la celda 'oculto' de la nota interna de la asesora amanecio vacia y el
+// desahogo volvio a quedar a la vista del codesarrollador. Con "vacia = se ve",
+// un clic mal dado en el Sheet publica algo privado.
+function estaPublicada(row) {
+  return String(row?.visibilidad || "").trim().toLowerCase() === "publicar";
+}
 // UNA SOLA REGLA en Documentos, Avances y Bitacora: la columna 'visibilidad' del
 // Sheet vacia = se ve; con la palabra "oculto" = no se ve. Igual en las tres,
 // para no tener que recordar dos comportamientos distintos.
@@ -1888,13 +1896,13 @@ function BitacoraForm({ value, onChange }) {
           y sin aprobacion. Lo que el asesor escribiera se le pintaba tal cual al
           codesarrollador. Ahora toda nota nace INTERNA y publicarla es un acto
           deliberado del admin. */}
-      <Field label="¿Quien puede ver esta nota?" hint="Es la columna 'visibilidad' del Sheet: vacia se ve, 'oculto' no.">
-        <Select value={esOculto(value) ? "oculto" : ""} onChange={(e) => set("visibilidad", e.target.value)}>
-          <option value="">La ve el codesarrollador en su portal</option>
-          <option value="oculto">Oculta — solo el equipo</option>
+      <Field label="¿Quien puede ver esta nota?" hint="Columna 'visibilidad' del Sheet. Las notas nacen OCULTAS: solo se publican si dice 'publicar'.">
+        <Select value={estaPublicada(value) ? "publicar" : ""} onChange={(e) => set("visibilidad", e.target.value)}>
+          <option value="">Oculta — solo el equipo</option>
+          <option value="publicar">Publicarla en el portal del codesarrollador</option>
         </Select>
       </Field>
-      {!esOculto(value) ? (
+      {estaPublicada(value) ? (
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
           <div className="flex items-start gap-2">
             <AlertCircle size={16} className="text-amber-600 shrink-0 mt-0.5" />
@@ -4349,7 +4357,7 @@ function InvestorApp({ clave, onLogout, onClaveCambiada }) {
               // proyecto. Lo que escribe la asesora nace 'oculto' a la fuerza.
               const bitacora = arr(data?.bitacora)
                 .filter(b => String(b.proyectoId) === String(iv.proyectoId))
-                .filter(b => !esOculto(b))   // misma regla que Documentos y Avances
+                .filter(b => estaPublicada(b))   // nace oculta: solo sale con "publicar"
                 .sort((a, b) => String(b.fecha || "").localeCompare(String(a.fecha || "")));
               return (
                 <div key={iv.folio} className="space-y-4">
@@ -4605,17 +4613,37 @@ function InvestorApp({ clave, onLogout, onClaveCambiada }) {
                         <button onClick={() => setPanel("duda")} className="mt-2.5 text-xs underline" style={{ color: "#b8965a" }}>Solicitar mis documentos</button>
                       </div>
                     ) : (
-                      <ul className="space-y-1.5">
-                        {docs.map((d) => (
-                          <li key={d.id} className="flex items-center gap-2.5 text-sm rounded-lg px-2.5 py-2 border border-slate-100 bg-slate-50/50">
-                            <FileText size={15} className="shrink-0" style={{ color: "#c9a96e" }} />
-                            <span className="text-slate-700 truncate flex-1">{d.nombre || d.tipo}</span>
-                            {d.tipo ? <span className="text-[10px] text-slate-400 hidden sm:inline">{d.tipo}</span> : null}
-                            {d.url
-                              ? <a href={d.url} target="_blank" rel="noreferrer" className="text-slate-400 hover:text-[#b8965a] shrink-0" title="Abrir"><Link2 size={15} /></a>
-                              : <span className="text-[10px] text-amber-600 shrink-0">sin archivo</span>}
-                          </li>
-                        ))}
+                      <ul className="space-y-2">
+                        {/* El RENGLON ENTERO es el boton. Antes el unico punto clicable
+                            era un icono de 15 px hasta la orilla: imposible de ver y
+                            demasiado chico para el dedo en un telefono. */}
+                        {docs.map((d) => {
+                          const Fila = d.url ? "a" : "div";
+                          const props = d.url
+                            ? { href: d.url, target: "_blank", rel: "noreferrer" }
+                            : {};
+                          return (
+                            <li key={d.id}>
+                              <Fila
+                                {...props}
+                                className={"flex items-center gap-3 text-sm rounded-xl px-3 py-2.5 border transition " + (d.url ? "border-slate-200 bg-white hover:border-[#c9a96e] hover:bg-[#fdfbf6] cursor-pointer" : "border-slate-100 bg-slate-50/50")}
+                              >
+                                <FileText size={17} className="shrink-0" style={{ color: "#c9a96e" }} />
+                                <span className="min-w-0 flex-1">
+                                  <span className="block text-slate-800 font-medium truncate">{d.nombre || d.tipo}</span>
+                                  {d.tipo ? <span className="block text-[11px] text-slate-400">{d.tipo}</span> : null}
+                                </span>
+                                {d.url ? (
+                                  <span className="shrink-0 inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg" style={{ background: "rgba(201,169,110,0.16)", color: "#7a5e1e" }}>
+                                    <ExternalLink size={13} /> Abrir
+                                  </span>
+                                ) : (
+                                  <span className="text-[11px] text-amber-600 shrink-0">sin archivo</span>
+                                )}
+                              </Fila>
+                            </li>
+                          );
+                        })}
                       </ul>
                     )}
                   </div>
