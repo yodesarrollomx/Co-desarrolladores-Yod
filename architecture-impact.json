@@ -1,0 +1,16 @@
+{
+  "model_revision": "2026-09-30.1",
+  "proposal_id": "CHG-ATLAS-001",
+  "summary": "Incorporar este repositorio al atlas de YOD OS: instrucciones para agentes, declaración de impacto y verificación de propuestas versionadas antes de integrar cambios.",
+  "components": [
+    "SYS-CODES-PORTAL",
+    "GAS-CODES",
+    "SHEET-CODES"
+  ],
+  "tests": [
+    "git diff --check",
+    "node scripts/pruebas-escenarios.mjs",
+    "npm ci && npm run build (compilación verificada; no demuestra funcionamiento en producción)"
+  ],
+  "rollback": "Revertir el commit de este cambio mediante revisión y repetir las verificaciones locales. No borrar ni restaurar registros de negocio, Sheets o archivos de clientes como parte del rollback."
+}
